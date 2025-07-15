@@ -7,8 +7,9 @@ import (
 	"neofrp/common/multidialer"
 	"net"
 
-	"github.com/charmbracelet/log"
 	"neofrp/common/config"
+
+	"github.com/charmbracelet/log"
 )
 
 func Run(config *config.ClientConfig) {
@@ -51,5 +52,8 @@ func Run(config *config.ClientConfig) {
 func GetTLSConfig() (*tls.Config, error) {
 	return &tls.Config{
 		InsecureSkipVerify: true,
+		ServerName:         "",             // Empty server name to avoid SNI issues
+		NextProtos:         []string{"h3"}, // HTTP/3 for QUIC
+		MinVersion:         tls.VersionTLS12,
 	}, nil
 }

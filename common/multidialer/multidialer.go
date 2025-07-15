@@ -73,8 +73,13 @@ func Dial(ctx context.Context, protocol, address string, tlsConfig *tls.Config) 
 	}
 }
 
+type SessionListener interface {
+	net.Listener
+	AcceptSession() (Session, error)
+}
+
 // Listen starts a server and returns a listener that accepts sessions.
-func Listen(ctx context.Context, protocol, address string, tlsConfig *tls.Config) (net.Listener, error) {
+func Listen(ctx context.Context, protocol, address string, tlsConfig *tls.Config) (SessionListener, error) {
 	switch protocol {
 	case "tcp":
 		l, err := tls.Listen("tcp", address, tlsConfig)
@@ -133,12 +138,21 @@ type quicListener struct {
 	*quic.Listener
 }
 
-func (l *quicListener) Accept() (net.Conn, error) {
+func (l *quicListener) AcceptSession() (Session, error) {
 	conn, err := l.Listener.Accept(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	return &sessionConn{Session: NewQUICSession(conn)}, nil
+	return NewQUICSession(conn), nil
+}
+
+// Modify the original Accept to use the new method for consistency
+func (l *quicListener) Accept() (net.Conn, error) {
+	session, err := l.AcceptSession()
+	if err != nil {
+		return nil, err
+	}
+	return &sessionConn{Session: session}, nil
 }
 
 // --- TCP Multiplexer Implementation ---
@@ -440,13 +454,21 @@ type tcpListener struct {
 	net.Listener
 }
 
-func (l *tcpListener) Accept() (net.Conn, error) {
+func (l *tcpListener) AcceptSession() (Session, error) {
 	conn, err := l.Listener.Accept()
 	if err != nil {
 		return nil, err
 	}
-	// Wrap the raw conn in a session and then in a net.Conn adapter
-	session := NewTCPSession(conn, false) // isClient = false
+	// isClient = false for server-side
+	return NewTCPSession(conn, false), nil
+}
+
+// Modify the original Accept to use the new method for consistency
+func (l *tcpListener) Accept() (net.Conn, error) {
+	session, err := l.AcceptSession()
+	if err != nil {
+		return nil, err
+	}
 	return &sessionConn{Session: session}, nil
 }
 
