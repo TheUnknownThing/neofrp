@@ -2,6 +2,7 @@ package client
 
 import (
 	E "errors"
+	"io"
 	"neofrp/common/multidialer"
 
 	"neofrp/common/config"
@@ -30,10 +31,7 @@ func (h *ControlHandler) Handshake() error {
 	}
 	// Read the response from the server
 	response := make([]byte, 1)
-	_, err = h.ControlStream.Read(response)
-	if err != nil {
-		return err
-	}
+	io.ReadFull(h.ControlStream, response)
 	switch response[0] {
 	case P.ReturnCodeAccepted:
 		return nil
