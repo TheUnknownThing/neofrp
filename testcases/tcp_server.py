@@ -2,6 +2,12 @@
 """
 Simple TCP Server for testing FRP implementation
 This server will receive forwarded connections from the FRP server
+
+Configuration:
+- FRP Server: 10.26.116.54:3400 (QUIC protocol)
+- TCP Service: Local port 25560 (forwarded to FRP server port 35560)
+- This server listens on local port 25560
+- The FRP client forwards this port to server port 35560
 """
 
 import socket

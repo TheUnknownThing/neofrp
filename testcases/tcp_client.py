@@ -2,6 +2,12 @@
 """
 Simple TCP Client for testing FRP implementation
 This client will connect through the FRP tunnel to reach the server
+
+Configuration:
+- FRP Server: 10.26.116.54:3400 (QUIC protocol)
+- TCP Service: Port 35560 (forwarded from client local port 25560)
+- This client connects to the external FRP server port 35560
+- The FRP client forwards local port 25560 to server port 35560
 """
 
 import socket
@@ -25,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class TCPClient:
-    def __init__(self, server_host='10.26.116.54', server_port=8080):
+    def __init__(self, server_host='10.26.116.54', server_port=35560):
         self.server_host = server_host
         self.server_port = server_port
         self.socket = None
@@ -187,7 +193,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='TCP Client for FRP testing')
     parser.add_argument('--host', default='10.26.116.54', help='FRP server host')
-    parser.add_argument('--port', type=int, default=8080, help='FRP server port')
+    parser.add_argument('--port', type=int, default=35560, help='FRP server port')
     parser.add_argument('--mode', choices=['auto', 'interactive', 'performance'], 
                        default='auto', help='Test mode')
     parser.add_argument('--count', type=int, default=5, help='Number of test messages (auto mode)')
