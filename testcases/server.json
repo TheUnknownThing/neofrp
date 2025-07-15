@@ -11,10 +11,10 @@
     },
     "connections": {
         "tcp_ports": [
-            8080
+            35560
         ],
         "udp_ports": [
-            8081
+            35561
         ]
     }
 }

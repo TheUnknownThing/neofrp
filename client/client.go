@@ -4,10 +4,17 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"neofrp/common/multidialer"
 	"net"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"neofrp/common/config"
+	C "neofrp/common/constant"
 
 	"github.com/charmbracelet/log"
 )
@@ -56,9 +63,56 @@ func Run(config *config.ClientConfig) {
 
 	log.Infof("Successfully negotiated with server")
 
-	// Keep the connection alive
-	// TODO: Add keep-alive mechanism and handle incoming streams
-	select {} // Block forever for now
+	// Create a wait group to keep the client running
+	var wg sync.WaitGroup
+
+	// Create a context that can be cancelled
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Start handling incoming streams from the server
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleIncomingStreams(ctx, session, config)
+	}()
+
+	// Keep the control connection alive and handle control messages
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleControlConnection(ctx, controlConn, session, config)
+	}()
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	log.Infof("Client is running. Press Ctrl+C to stop.")
+
+	// Wait for either all goroutines to finish or a signal
+	go func() {
+		wg.Wait()
+	}()
+
+	// Block until we receive a signal
+	<-sigChan
+	log.Infof("Received shutdown signal, stopping client...")
+	cancel()
+
+	// Wait for graceful shutdown with timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Infof("Client stopped gracefully")
+	case <-time.After(5 * time.Second):
+		log.Warnf("Timeout waiting for graceful shutdown")
+	}
 }
 
 func GetTLSConfig() (*tls.Config, error) {
@@ -68,4 +122,213 @@ func GetTLSConfig() (*tls.Config, error) {
 		NextProtos:         []string{"h3"}, // HTTP/3 for QUIC
 		MinVersion:         tls.VersionTLS12,
 	}, nil
+}
+
+func handleIncomingStreams(ctx context.Context, session multidialer.Session, config *config.ClientConfig) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Infof("Context cancelled, stopping stream handler")
+			return
+		default:
+			// Accept incoming streams from the server
+			stream, err := session.AcceptStream(ctx)
+			if err != nil {
+				log.Errorf("Failed to accept stream: %v", err)
+				// Add a small delay to prevent tight loop on persistent errors
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			// Handle each stream in a separate goroutine
+			go handleStream(ctx, stream, config)
+		}
+	}
+}
+
+func handleStream(ctx context.Context, stream multidialer.Stream, config *config.ClientConfig) {
+	defer stream.Close()
+
+	// Read the tagged port from the stream to know which local service to connect to
+	taggedPortBytes := make([]byte, 3)
+	_, err := io.ReadFull(stream, taggedPortBytes)
+	if err != nil {
+		log.Errorf("Failed to read tagged port from stream: %v", err)
+		return
+	}
+
+	// Parse the tagged port
+	var portType string
+	switch taggedPortBytes[0] {
+	case C.PortTypeTCP:
+		portType = "tcp"
+	case C.PortTypeUDP:
+		portType = "udp"
+	default:
+		log.Errorf("Unknown port type: %d", taggedPortBytes[0])
+		return
+	}
+
+	serverPort := uint16(taggedPortBytes[1])<<8 | uint16(taggedPortBytes[2])
+	log.Infof("Handling stream for %s port %d", portType, serverPort)
+
+	// Find the corresponding local port configuration
+	var localPort int
+	var found bool
+	for _, connConfig := range config.ConnectionConfigs {
+		if connConfig.Type == portType && connConfig.ServerPort == int(serverPort) {
+			localPort = connConfig.LocalPort
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		log.Errorf("No local configuration found for %s port %d", portType, serverPort)
+		return
+	}
+
+	// Connect to the local service
+	if portType == "tcp" {
+		handleTCPStream(ctx, stream, localPort)
+	} else if portType == "udp" {
+		handleUDPStream(ctx, stream, localPort)
+	}
+}
+
+func handleTCPStream(ctx context.Context, stream multidialer.Stream, localPort int) {
+	// Connect to the local TCP service
+	localConn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	if err != nil {
+		log.Errorf("Failed to connect to local TCP service on port %d: %v", localPort, err)
+		return
+	}
+	defer localConn.Close()
+
+	log.Infof("Connected to local TCP service on port %d", localPort)
+
+	// Create a context for this connection
+	connCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Start bidirectional data copying
+	go func() {
+		defer cancel() // Cancel context when one direction fails
+		_, err := io.Copy(stream, localConn)
+		if err != nil {
+			log.Errorf("Error copying from local to stream: %v", err)
+		}
+	}()
+
+	go func() {
+		defer cancel() // Cancel context when one direction fails
+		_, err := io.Copy(localConn, stream)
+		if err != nil {
+			log.Errorf("Error copying from stream to local: %v", err)
+		}
+	}()
+
+	// Wait for context cancellation (either from parent or connection error)
+	<-connCtx.Done()
+	log.Infof("TCP connection to port %d closed", localPort)
+}
+
+func handleUDPStream(ctx context.Context, stream multidialer.Stream, localPort int) {
+	// Connect to the local UDP service
+	localConn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	if err != nil {
+		log.Errorf("Failed to connect to local UDP service on port %d: %v", localPort, err)
+		return
+	}
+	defer localConn.Close()
+
+	log.Infof("Connected to local UDP service on port %d", localPort)
+
+	// Create a context for this connection
+	connCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Start bidirectional data copying
+	go func() {
+		defer cancel() // Cancel context when one direction fails
+		_, err := io.Copy(stream, localConn)
+		if err != nil {
+			log.Errorf("Error copying from local to stream: %v", err)
+		}
+	}()
+
+	go func() {
+		defer cancel() // Cancel context when one direction fails
+		_, err := io.Copy(localConn, stream)
+		if err != nil {
+			log.Errorf("Error copying from stream to local: %v", err)
+		}
+	}()
+
+	// Wait for context cancellation (either from parent or connection error)
+	<-connCtx.Done()
+	log.Infof("UDP connection to port %d closed", localPort)
+}
+
+func handleControlConnection(ctx context.Context, controlConn multidialer.Stream, session multidialer.Session, config *config.ClientConfig) {
+	defer controlConn.Close()
+
+	// Send periodic keep-alive messages to maintain the connection
+	keepAliveTicker := time.NewTicker(30 * time.Second)
+	defer keepAliveTicker.Stop()
+
+	// Channel to handle control messages
+	controlMsg := make(chan []byte, 10)
+
+	// Start a goroutine to read control messages
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				n, err := controlConn.Read(buf)
+				if err != nil {
+					if err != io.EOF {
+						log.Errorf("Error reading from control connection: %v", err)
+					}
+					return
+				}
+
+				if n > 0 {
+					// Copy the data to avoid race conditions
+					msg := make([]byte, n)
+					copy(msg, buf[:n])
+					select {
+					case controlMsg <- msg:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// Main control loop
+	for {
+		select {
+		case <-ctx.Done():
+			log.Infof("Context cancelled, stopping control connection handler")
+			return
+
+		case msg := <-controlMsg:
+			log.Infof("Received control message: %v", msg)
+			// Handle control messages here if needed
+
+		case <-keepAliveTicker.C:
+			// Send keep-alive message
+			_, err := controlConn.Write([]byte{0x00}) // Simple keep-alive byte
+			if err != nil {
+				log.Errorf("Failed to send keep-alive: %v", err)
+				return
+			}
+			log.Debugf("Sent keep-alive message")
+		}
+	}
 }
