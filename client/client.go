@@ -234,8 +234,15 @@ func handleTCPStream(ctx context.Context, stream multidialer.Stream, localPort i
 }
 
 func handleUDPStream(ctx context.Context, stream multidialer.Stream, localPort int) {
-	// Connect to the local UDP service
-	localConn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	// Create UDP connection to the local service
+	localAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	if err != nil {
+		log.Errorf("Failed to resolve local UDP address for port %d: %v", localPort, err)
+		return
+	}
+
+	// Create UDP connection
+	localConn, err := net.DialUDP("udp", nil, localAddr)
 	if err != nil {
 		log.Errorf("Failed to connect to local UDP service on port %d: %v", localPort, err)
 		return
@@ -248,20 +255,62 @@ func handleUDPStream(ctx context.Context, stream multidialer.Stream, localPort i
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Start bidirectional data copying
+	// Handle stream to local UDP (server -> client -> local service)
 	go func() {
-		defer cancel() // Cancel context when one direction fails
-		_, err := io.Copy(stream, localConn)
-		if err != nil {
-			log.Errorf("Error copying from local to stream: %v", err)
+		defer cancel()
+		buffer := make([]byte, 4096)
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			default:
+				n, err := stream.Read(buffer)
+				if err != nil {
+					if err != io.EOF {
+						log.Errorf("Error reading from stream: %v", err)
+					}
+					return
+				}
+				if n > 0 {
+					_, err = localConn.Write(buffer[:n])
+					if err != nil {
+						log.Errorf("Error writing to local UDP service: %v", err)
+						return
+					}
+				}
+			}
 		}
 	}()
 
+	// Handle local UDP to stream (local service -> client -> server)
 	go func() {
-		defer cancel() // Cancel context when one direction fails
-		_, err := io.Copy(localConn, stream)
-		if err != nil {
-			log.Errorf("Error copying from stream to local: %v", err)
+		defer cancel()
+		buffer := make([]byte, 4096)
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			default:
+				// Set a read timeout to prevent blocking indefinitely
+				localConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				n, err := localConn.Read(buffer)
+				if err != nil {
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						continue // Timeout is expected, continue
+					}
+					if err != io.EOF {
+						log.Errorf("Error reading from local UDP service: %v", err)
+					}
+					return
+				}
+				if n > 0 {
+					_, err = stream.Write(buffer[:n])
+					if err != nil {
+						log.Errorf("Error writing to stream: %v", err)
+						return
+					}
+				}
+			}
 		}
 	}()
 

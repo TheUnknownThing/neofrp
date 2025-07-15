@@ -96,6 +96,9 @@ func (l *UDPPortListener) Start() error {
 				_, err = (*stream).Write(buf[:n])
 				if err != nil {
 					log.Errorf("Failed to write to existing stream for %s: %v", addr.String(), err)
+					// Clean up the failed stream
+					(*stream).Close()
+					l.SourceMap.Delete(addr)
 					continue
 				}
 			} else {
@@ -124,16 +127,70 @@ func (l *UDPPortListener) Start() error {
 				// Store the new stream in the source map
 				l.SourceMap.Set(addr, &newStream)
 				log.Infof("Opened new stream for %s on UDP port %s", addr.String(), l.TaggedPort.String())
+
+				// Start a goroutine to handle responses from the stream back to the UDP client
+				go l.handleUDPStreamResponse(conn, addr, &newStream)
+
 				time.Sleep(C.RelayInterval)
 				// Now write the data to the new stream
 				_, err = newStream.Write(buf[:n])
 				if err != nil {
 					log.Errorf("Failed to write data to new stream for %s: %v", addr.String(), err)
 					newStream.Close()
+					l.SourceMap.Delete(addr)
 					continue
 				}
 			}
 		}
 	}()
 	return nil
+}
+
+// handleUDPStreamResponse handles responses from the stream back to the UDP client
+func (l *UDPPortListener) handleUDPStreamResponse(conn *net.UDPConn, clientAddr *net.UDPAddr, stream *multidialer.Stream) {
+	defer func() {
+		(*stream).Close()
+		l.SourceMap.Delete(clientAddr)
+		log.Infof("Closed stream for %s on UDP port %s", clientAddr.String(), l.TaggedPort.String())
+	}()
+
+	buf := make([]byte, 4096)
+	lastActivity := time.Now()
+	timeout := 60 * time.Second // 60 second timeout for idle streams
+
+	for {
+		// Check for timeout
+		if time.Since(lastActivity) > timeout {
+			log.Infof("Stream timeout for %s on UDP port %s", clientAddr.String(), l.TaggedPort.String())
+			return
+		}
+
+		// Set a read deadline to prevent blocking indefinitely
+		deadline := time.Now().Add(1 * time.Second)
+		if netConn, ok := (*stream).(interface{ SetReadDeadline(time.Time) error }); ok {
+			netConn.SetReadDeadline(deadline)
+		}
+
+		n, err := (*stream).Read(buf)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue // Read timeout, check for overall timeout and continue
+			}
+			if err != io.EOF {
+				log.Errorf("Failed to read response from stream for %s: %v", clientAddr.String(), err)
+			}
+			return
+		}
+
+		if n > 0 {
+			lastActivity = time.Now()
+			// Send the response back to the original UDP client
+			_, err = conn.WriteToUDP(buf[:n], clientAddr)
+			if err != nil {
+				log.Errorf("Failed to send response to UDP client %s: %v", clientAddr.String(), err)
+				return
+			}
+			log.Infof("Sent %d bytes response to %s on UDP port %s", n, clientAddr.String(), l.TaggedPort.String())
+		}
+	}
 }
