@@ -1,4 +1,4 @@
-# frp
+# neofrp
 
 A Norb's new implementation of Fast Reverse Proxy, focusing on speed and multiplexing (neofrp).
 
