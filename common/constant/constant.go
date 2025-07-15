@@ -11,4 +11,9 @@ const (
 	KeepAliveTimeout  = 5 * time.Second
 	KeepAliveInterval = 1 * time.Second
 	RelayInterval	  = 100 * time.Millisecond
+
+	PortTypeTCP  byte = 0x01
+	PortTypeUDP  byte = 0x02
+
+	ContextPortMapKey = ContextKeyType(0x01)
 )

@@ -2,19 +2,14 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"fmt"
-	"math/big"
-	"neofrp/common/config"
-	"neofrp/common/multidialer"
 	"net"
-	"time"
 
 	"github.com/charmbracelet/log"
+	"neofrp/common/config"
+	C "neofrp/common/constant"
+	"neofrp/common/multidialer"
+	"neofrp/common/safemap"
 )
 
 // Run initializes the server service with the provided configuration
@@ -26,6 +21,10 @@ func Run(config *config.ServerConfig) {
 		return
 	}
 	ctx := context.Background()
+	// Register the portmap into ctx
+	ctx = context.WithValue(ctx, C.ContextPortMapKey, safemap.NewSafeMap[C.TaggedPort, C.SessionIndexCompound]())
+	// Setup all the ports
+
 	// Start the server with the TLS configuration
 	listener, err := multidialer.Listen(
 		ctx,
@@ -68,62 +67,43 @@ func handleSession(ctx context.Context, config *config.ServerConfig, session mul
 		return
 	}
 	log.Infof("Handshake successful with client %s", session.RemoteAddr())
+	err = controlHandler.Negotiate(config)
+	if err != nil {
+		log.Errorf("Negotiation failed: %v", err)
+		return
+	}
 }
 
-func GetTLSConfig() (*tls.Config, error) {
-	// Generate a self-signed certificate for the server
-	cert, err := generateSelfSignedCert()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate self-signed certificate: %v", err)
+func SetupPorts(ctx context.Context, config *config.ServerConfig) error {
+	portMap := ctx.Value("portmap").(*safemap.SafeMap[C.TaggedPort, C.SessionIndexCompound])
+	if portMap == nil {
+		return fmt.Errorf("portmap not found in context")
 	}
 
-	return &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: true,
-		ServerName:         "",             // Empty server name to avoid SNI issues
-		NextProtos:         []string{"h3"}, // HTTP/3 for QUIC
-		MinVersion:         tls.VersionTLS12,
-	}, nil
-}
-
-func generateSelfSignedCert() (tls.Certificate, error) {
-	// Generate a private key
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return tls.Certificate{}, err
+	for _, port := range config.ConnectionConfig.TCPPorts {
+		taggedPort := C.TaggedPort{
+			PortType: "tcp",
+			Port:     C.PortType(port),
+		}
+		sessionIndex := C.SessionIndexCompound{
+			Session: nil, // This will be set when a session is accepted
+			Index:   0,   // This will be set when a session is accepted
+		}
+		portMap.Set(taggedPort, sessionIndex)
+		log.Infof("Registered port %d with type %d", port, C.PortTypeTCP)
+	}
+	for _, port := range config.ConnectionConfig.UDPPorts {
+		taggedPort := C.TaggedPort{
+			PortType: "udp",
+			Port:     C.PortType(port),
+		}
+		sessionIndex := C.SessionIndexCompound{
+			Session: nil, // This will be set when a session is accepted
+			Index:   0,   // This will be set when a session is accepted
+		}
+		portMap.Set(taggedPort, sessionIndex)
+		log.Infof("Registered port %d with type %d", port, C.PortTypeUDP)
 	}
 
-	// Create certificate template
-	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization:  []string{"FRP"},
-			Country:       []string{"US"},
-			Province:      []string{""},
-			Locality:      []string{""},
-			StreetAddress: []string{""},
-			PostalCode:    []string{""},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}, // localhost
-		DNSNames:              []string{"localhost"},
-	}
-
-	// Create certificate
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	// Create tls.Certificate
-	cert := tls.Certificate{
-		Certificate: [][]byte{certDER},
-		PrivateKey:  privateKey,
-	}
-
-	return cert, nil
+	return nil
 }

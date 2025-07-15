@@ -42,3 +42,7 @@ func (h *ControlHandler) Handshake() error {
 	}
 	return nil
 }
+
+func (h *ControlHandler) Negotiate(config *config.ServerConfig) error {
+	return nil
+}

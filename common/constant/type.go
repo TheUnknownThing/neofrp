@@ -1,9 +1,11 @@
 package constant
 
 import (
+	"fmt"
 	"bufio"
 	"bytes"
 	"io"
+	"neofrp/common/multidialer"
 	"net"
 )
 
@@ -29,3 +31,31 @@ type BidirectionalPipe struct {
 	Reader *io.PipeReader
 	Writer *io.PipeWriter
 }
+
+type TaggedPort struct {
+	PortType string
+	Port     PortType
+}
+
+type SessionIndexCompound struct {
+	Session *multidialer.Session
+	Index   uint8
+}
+
+func (tp *TaggedPort) String() string {
+	return tp.PortType + ":" + fmt.Sprint(tp.Port)
+}
+
+func (tp *TaggedPort) Bytes() []byte {
+	// use big endian encoding
+	switch tp.PortType {
+		case "tcp":
+			return []byte{PortTypeTCP, byte(tp.Port >> 8), byte(tp.Port & 0xFF)}
+		case "udp":
+			return []byte{PortTypeUDP, byte(tp.Port >> 8), byte(tp.Port & 0xFF)}
+		default:
+			return nil
+	}
+}
+
+type ContextKeyType byte
