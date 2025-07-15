@@ -1,0 +1,23 @@
+{
+    "log": {
+        "log_level": "debug"
+    },
+    "token": "user_token",
+    "server": {
+        "protocol": "quic",
+        "ip": "10.26.116.54",
+        "port": 3400
+    },
+    "connections": [
+        {
+            "type": "tcp",
+            "local_port": 25560,
+            "server_port": 35560
+        },
+        {
+            "type": "udp",
+            "local_port": 25561,
+            "server_port": 35561
+        }
+    ]
+}

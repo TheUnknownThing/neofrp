@@ -1,0 +1,18 @@
+{
+    "log": {
+        "log_level": "debug"
+    },
+    "recognized_tokens": [
+        "user_token"
+    ],
+    "protocol": "quic",
+    "port": 3400,
+    "connections": {
+        "tcp_ports": [
+            8080
+        ],
+        "udp_ports": [
+            8081
+        ]
+    }
+}
