@@ -47,6 +47,18 @@ func Run(config *config.ClientConfig) {
 		log.Errorf("Handshake failed: %v", err)
 		return
 	}
+
+	err = controlHandler.Negotiate()
+	if err != nil {
+		log.Errorf("Negotiation failed: %v", err)
+		return
+	}
+
+	log.Infof("Successfully negotiated with server")
+
+	// Keep the connection alive
+	// TODO: Add keep-alive mechanism and handle incoming streams
+	select {} // Block forever for now
 }
 
 func GetTLSConfig() (*tls.Config, error) {
