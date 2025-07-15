@@ -3,10 +3,10 @@
         "log_level": "debug"
     },
     "token": "user_token",
-    "server": {
+    "transport": {
         "protocol": "quic",
-        "ip": "10.26.116.54",
-        "port": 3400
+        "server_ip": "10.26.116.54",
+        "server_port": 3400
     },
     "connections": [
         {
