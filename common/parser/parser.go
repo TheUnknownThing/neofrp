@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"internal.github/Norb/frp/common/config"
+	"neofrp/common/config"
 )
 
 // ParseClientConfig reads and parses the client configuration file.

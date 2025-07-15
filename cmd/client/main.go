@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 
+	"neofrp/client"
+
+	"neofrp/common/parser"
+
 	"github.com/charmbracelet/log"
-	"internal.github/Norb/frp/client"
-	"internal.github/Norb/frp/common/parser"
 )
 
 func main() {
@@ -32,7 +34,7 @@ func main() {
 	}
 
 	log.Infof("Parsed client config")
-	
+
 	// Run the client service
 	client.Run(config)
 }

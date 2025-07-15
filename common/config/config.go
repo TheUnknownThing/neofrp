@@ -1,7 +1,7 @@
 package config
 
 import (
-	"internal.github/Norb/frp/common/constant"
+	"neofrp/common/constant"
 )
 
 type ClientConfig struct {

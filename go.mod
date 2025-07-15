@@ -2,14 +2,9 @@ module neofrp
 
 go 1.23
 
-replace internal.github/Norb/frp => ../neofrp
-
 toolchain go1.23.11
 
-require (
-	github.com/charmbracelet/log v0.4.2
-	internal.github/Norb/frp v0.0.0-00010101000000-000000000000
-)
+require github.com/charmbracelet/log v0.4.2
 
 require (
 	go.uber.org/mock v0.5.0 // indirect

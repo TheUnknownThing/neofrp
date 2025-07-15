@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 
+	"neofrp/common/parser"
+
+	"neofrp/server"
+
 	"github.com/charmbracelet/log"
-	"internal.github/Norb/frp/common/parser"
-	"internal.github/Norb/frp/server"
 )
 
 func main() {

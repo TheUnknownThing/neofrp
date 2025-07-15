@@ -5,8 +5,9 @@ import (
 	"io"
 	"net"
 
+	"neofrp/common/hexdump"
+
 	"github.com/charmbracelet/log"
-	"internal.github/Norb/frp/common/hexdump"
 )
 
 // NoisyConn is a wrapper around net.Conn that adds logging for all read and write operations.

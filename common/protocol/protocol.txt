@@ -1,0 +1,12 @@
+@TCP
+
+in an frp, only the client can initialize sessions
+
+client initializes TCP/TLS with server (no token required)
+
+client:
+
+[VERSION]   [TOKEN_LEN]   [TOKEN]
+byte        byte          []byte
+
+current version: 0x03
