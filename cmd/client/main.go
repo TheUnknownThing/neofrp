@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"neofrp/client"
-
+	C "neofrp/common/constant"
 	"neofrp/common/parser"
 
 	"github.com/charmbracelet/log"
@@ -34,6 +34,13 @@ func main() {
 	}
 
 	log.Infof("Parsed client config")
+	logLevel := config.LogConfig.LogLevel
+	if logLevel == "" || C.LogLevelMap[logLevel] == 0 {
+		log.Warnf("Using default log level INFO")
+		log.SetLevel(log.InfoLevel)
+	} else {
+		log.SetLevel(C.LogLevelMap[logLevel])
+	}
 
 	// Run the client service
 	client.Run(config)

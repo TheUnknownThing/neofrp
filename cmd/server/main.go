@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	C "neofrp/common/constant"
 	"neofrp/common/parser"
-
 	"neofrp/server"
 
 	"github.com/charmbracelet/log"
@@ -34,6 +34,13 @@ func main() {
 	}
 
 	log.Info("Parsed server config")
+	logLevel := config.LogConfig.LogLevel
+	if logLevel == "" || C.LogLevelMap[logLevel] == 0 {
+		log.Warnf("Using default log level INFO")
+		log.SetLevel(log.InfoLevel)
+	} else {
+		log.SetLevel(C.LogLevelMap[logLevel])
+	}
 
 	// Run the server service
 	server.Run(config)
