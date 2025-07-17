@@ -61,14 +61,24 @@ func Run(config *config.ServerConfig) {
 }
 
 func handleSession(ctx context.Context, config *config.ServerConfig, session multidialer.Session) {
+	// Create a cancellable context for this session
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	defer sessionCancel()
+
 	// Open a signal channel to handle cancellation
 	cancelChan := make(chan os.Signal, 1)
 	signal.Notify(cancelChan, os.Interrupt, syscall.SIGTERM)
-	ctx = context.WithValue(ctx, C.ContextSignalChanKey, cancelChan)
-	defer close(cancelChan)
+	sessionCtx = context.WithValue(sessionCtx, C.ContextSignalChanKey, cancelChan)
+
+	// Cleanup function to ensure resources are properly released
+	defer func() {
+		signal.Stop(cancelChan)
+		close(cancelChan)
+		log.Infof("Session cleanup completed for %s", session.RemoteAddr())
+	}()
 
 	// Open a control stream for the session
-	controlConn, err := session.AcceptStream(ctx)
+	controlConn, err := session.AcceptStream(sessionCtx)
 	if err != nil {
 		log.Errorf("Failed to accept control stream: %v", err)
 		return
@@ -123,11 +133,34 @@ func handleSession(ctx context.Context, config *config.ServerConfig, session mul
 	}
 
 	// Setup the control feedback loop
-	go RunControlLoop(ctx, controlConn, session, config)
+	go RunControlLoop(sessionCtx, controlConn, session, config)
 
 	// Wait for cancellation signal
-	<- cancelChan
+	<-cancelChan
 	log.Infof("Received cancellation signal, closing session %s", session.RemoteAddr())
+
+	// Clean up session from portmap
+	if portMap != nil {
+		// Remove session from TCP ports
+		for _, port := range config.ConnectionConfig.TCPPorts {
+			taggedPort := C.TaggedPort{
+				PortType: "tcp",
+				Port:     C.PortType(port),
+			}
+			portMap.Delete(taggedPort)
+			log.Infof("Unregistered session %s from TCP port %d", session.RemoteAddr(), port)
+		}
+
+		// Remove session from UDP ports
+		for _, port := range config.ConnectionConfig.UDPPorts {
+			taggedPort := C.TaggedPort{
+				PortType: "udp",
+				Port:     C.PortType(port),
+			}
+			portMap.Delete(taggedPort)
+			log.Infof("Unregistered session %s from UDP port %d", session.RemoteAddr(), port)
+		}
+	}
 
 	// Close the session gracefully
 	err = session.Close(fmt.Errorf("session closed by server due to cancellation"))

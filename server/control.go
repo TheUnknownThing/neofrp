@@ -113,7 +113,13 @@ func CancelConnection(ctx context.Context) {
 	cancelChan := ctx.Value(C.ContextSignalChanKey).(chan os.Signal)
 	if cancelChan != nil {
 		log.Debug("Sending interrupt signal to cancel connection")
-		cancelChan <- os.Interrupt
+		select {
+		case cancelChan <- os.Interrupt:
+			// Signal sent successfully
+		default:
+			// Channel is full or closed, ignore
+			log.Debug("Cancel channel is full or closed, skipping signal")
+		}
 	} else {
 		log.Warn("No cancel channel found in context, cannot send interrupt signal")
 	}
@@ -162,12 +168,19 @@ func RunControlLoop(ctx context.Context, controlConn multidialer.Stream, session
 	// Setup keepalive monitoring
 	go func() {
 		ticker := time.NewTicker(C.KeepAliveTimeout)
-		for range ticker.C {
-			lastKeepAlive := ctx.Value(C.ContextLastKeepAliveKey)
-			if lastKeepAlive == nil || time.Since(lastKeepAlive.(time.Time)) > C.KeepAliveTimeout {
-				log.Warnf("No keep-alive received in the last %v, closing connection", C.KeepAliveTimeout)
-				// Close the connection to the server
-				CancelConnection(ctx)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				lastKeepAlive := ctx.Value(C.ContextLastKeepAliveKey)
+				if lastKeepAlive == nil || time.Since(lastKeepAlive.(time.Time)) > C.KeepAliveTimeout {
+					log.Warnf("No keep-alive received in the last %v, closing connection", C.KeepAliveTimeout)
+					// Close the connection to the server
+					CancelConnection(ctx)
+					return
+				}
 			}
 		}
 	}()

@@ -59,8 +59,28 @@ func (l *TCPPortListener) Start() error {
 				continue
 			}
 			// Now use connection copy to relay data
-			go io.Copy(newConn, conn)
-			go io.Copy(conn, newConn)
+			go func(localConn net.Conn, remoteConn multidialer.Stream) {
+				defer localConn.Close()
+				defer remoteConn.Close()
+
+				// Create a context for this connection
+				connCtx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				// Copy data bidirectionally
+				go func() {
+					defer cancel()
+					io.Copy(remoteConn, localConn)
+				}()
+
+				go func() {
+					defer cancel()
+					io.Copy(localConn, remoteConn)
+				}()
+
+				// Wait for cancellation
+				<-connCtx.Done()
+			}(conn, newConn)
 		}
 	}()
 	return nil
