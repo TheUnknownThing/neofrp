@@ -1,23 +1,178 @@
-# neofrp
+<div align="center">
+  <img src="./public/icon.png" alt="neofrp-logo" width="180">
+</div>
 
-A Norb's new implementation of Fast Reverse Proxy, focusing on speed and multiplexing (neofrp).
+# Neofrp
 
-## Requirements
+A modern, high-performance reverse proxy implementation in Go, focusing on speed, multiplexing, and secure transport protocols.
 
-A simple implementation of frp (Fast Reverse Proxy) that maps a port on a local machine A in the intranet to a port on a remote machine B in the internet, allowing the internet to access the service on A through B.
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-blue.svg)](https://golang.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./public/license.pdf)
 
-The implementation should support both TCP and UDP protocols, and support both TCP and QUIC in the transport layer.
+## 🚀 Features
 
-Security should be enforced with mutual TLS authentication, with utilities to generate certificates and keys for both A and B based on openssl.
+- **High Performance**: Built with Go for concurrent processing and low latency
+- **Secure Communication**: Enforced secure communication via QUIC(udp) and TLS(tcp) transport
+- **Port Multiplexing**: Allowing for efficient handling of multiple TCP/UDP port forwarding
+- **Easy Configuration**: JSON-based configuration files
+- **Comprehensive Logging**: Structured logging with configurable levels
 
-Bandwidth and latency should be comparable to the original frp implementation under 1Gbps network conditions.
+## 📋 Table of Contents
 
-Also, your implementation should be drastically different from the original frp implementation to avoid detection from corporate firewalls and antivirus.
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+- [Configuration](#-configuration)
+- [Contributing](#-contributing)
 
-## Design
+## 🔧 Installation
 
-In order to bypass firewall protection against the original frp implementation, it is important to avoid the patterns that are associated with the original frp.
+### Prerequisites
 
-1. Custom Protocol: The original frp uses a specific protocol which, though under TLS protection, can be detected via active probing. We shall use a custom protocol different from the original frp implementation.
+- Go 1.23 or higher
+- Git (for cloning the repository)
 
-2. Work Connections: Originally the frp service will spawn multiple work connections while maintaining a single control connection, and they do not share the same TLS session. This makes for easy detection without active probing. We will make sure that the handshake session persists and is used as the outbound connection, while forwarding all inbound connections.
+### Build from Source
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd neofrp
+
+# Build both client and server
+make
+
+# Or build individually
+make bin/frpc  # Client only
+make bin/frps  # Server only
+```
+
+The binaries will be created in the `bin/` directory:
+- `bin/frpc` - Client binary
+- `bin/frps` - Server binary
+
+## 🚀 Quick Start
+
+### 1. Server Setup
+
+Create a server configuration file `server.json`:
+
+```json
+{
+    "log": {
+        "log_level": "info"
+    },
+    "recognized_tokens": [
+        "your_secret_token"
+    ],
+    "transport": {
+        "protocol": "quic",
+        "port": 3400
+    },
+    "connections": {
+        "tcp_ports": [35560, 35561],
+        "udp_ports": [35562]
+    }
+}
+```
+
+Start the server:
+```bash
+./bin/frps -c server.json
+```
+
+### 2. Client Setup
+
+Create a client configuration file `client.json`:
+
+```json
+{
+    "log": {
+        "log_level": "info"
+    },
+    "token": "your_secret_token",
+    "transport": {
+        "protocol": "quic",
+        "server_ip": "your.server.ip",
+        "server_port": 3400
+    },
+    "connections": [
+        {
+            "type": "tcp",
+            "local_port": 22,
+            "server_port": 35560
+        },
+        {
+            "type": "tcp",
+            "local_port": 80,
+            "server_port": 35561
+        }
+    ]
+}
+```
+
+Start the client:
+```bash
+./bin/frpc -c client.json
+```
+
+Now you can access your local services through the server:
+- `your.server.ip:35560` → `localhost:22` (SSH)
+- `your.server.ip:35561` → `localhost:80` (HTTP)
+
+You can forward any local port, TCP or UDP, by editing the `client.json` file and ensuring that the corresponding ports are exposed in the server configuration.
+
+## ⚙️ Configuration
+
+### Server Configuration
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `log.log_level` | string | Logging level (debug, info, warn, error, fatal) | "info" |
+| `recognized_tokens` | array | List of valid client tokens | [] |
+| `transport.protocol` | string | Transport protocol ("quic" or "tcp") | "quic" |
+| `transport.port` | number | Server listening port | Required |
+| `connections.tcp_ports` | array | TCP ports to expose | [] |
+| `connections.udp_ports` | array | UDP ports to expose | [] |
+
+### Client Configuration
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `log.log_level` | string | Logging level (debug, info, warn, error, fatal) | "info" |
+| `token` | string | Authentication token | Required |
+| `transport.protocol` | string | Transport protocol ("quic" or "tcp") | "quic" |
+| `transport.server_ip` | string | Server IP address | Required |
+| `transport.server_port` | number | Server port | Required |
+| `connections` | array | Connection configurations | Required |
+
+#### Connection Configuration
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Connection type ("tcp" or "udp") |
+| `local_port` | number | Local port to forward from |
+| `server_port` | number | Server port to forward to |
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development Setup
+
+```bash
+# Clone and build
+git clone <repository-url>
+cd neofrp
+make build
+
+# Clean build artifacts
+make clean
+```
+
+## 📄 License
+
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
