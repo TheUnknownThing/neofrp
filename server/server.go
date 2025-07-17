@@ -18,7 +18,7 @@ import (
 
 // Run initializes the server service with the provided configuration
 func Run(config *config.ServerConfig) {
-	log.Infof("Starting server with config: %+v", config)
+	log.Debugf("Run using config: %+v", config)
 	tlsConfig, err := GetTLSConfig()
 	if err != nil {
 		log.Errorf("Failed to get TLS config: %v", err)
