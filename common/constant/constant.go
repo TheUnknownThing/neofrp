@@ -16,4 +16,6 @@ const (
 	PortTypeUDP  byte = 0x02
 
 	ContextPortMapKey = ContextKeyType(0x01)
+	ContextLastKeepAliveKey = ContextKeyType(0x02)
+	ContextSignalChanKey = ContextKeyType(0x03)
 )

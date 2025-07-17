@@ -21,7 +21,7 @@ import (
 
 func Run(config *config.ClientConfig) {
 	// Initialize the client service with the provided configuration
-	log.Infof("Starting client with config: %+v", config)
+	log.Debugf("Run using config: %+v", config)
 	// First create the master connection to the server
 	tlsConfig, err := GetTLSConfig()
 	if err != nil {
@@ -42,6 +42,10 @@ func Run(config *config.ClientConfig) {
 
 	// Build the control connection
 	ctx := context.Background()
+	// Let context be cancelable
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ctx = context.WithValue(ctx, C.ContextLastKeepAliveKey, time.Now())
 	controlConn, err := session.OpenStream(ctx)
 	if err != nil {
 		log.Errorf("Failed to open control stream: %v", err)
@@ -63,12 +67,13 @@ func Run(config *config.ClientConfig) {
 
 	log.Infof("Successfully negotiated with server")
 
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	ctx = context.WithValue(ctx, C.ContextSignalChanKey, sigChan)
+
 	// Create a wait group to keep the client running
 	var wg sync.WaitGroup
-
-	// Create a context that can be cancelled
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	// Start handling incoming streams from the server
 	wg.Add(1)
@@ -81,12 +86,8 @@ func Run(config *config.ClientConfig) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handleControlConnection(ctx, controlConn, session, config)
+		RunControlLoop(ctx, controlConn, session, config)
 	}()
-
-	// Set up signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	log.Infof("Client is running. Press Ctrl+C to stop.")
 
@@ -317,67 +318,4 @@ func handleUDPStream(ctx context.Context, stream multidialer.Stream, localPort i
 	// Wait for context cancellation (either from parent or connection error)
 	<-connCtx.Done()
 	log.Infof("UDP connection to port %d closed", localPort)
-}
-
-func handleControlConnection(ctx context.Context, controlConn multidialer.Stream, session multidialer.Session, config *config.ClientConfig) {
-	defer controlConn.Close()
-
-	// Send periodic keep-alive messages to maintain the connection
-	keepAliveTicker := time.NewTicker(30 * time.Second)
-	defer keepAliveTicker.Stop()
-
-	// Channel to handle control messages
-	controlMsg := make(chan []byte, 10)
-
-	// Start a goroutine to read control messages
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				n, err := controlConn.Read(buf)
-				if err != nil {
-					if err != io.EOF {
-						log.Errorf("Error reading from control connection: %v", err)
-					}
-					return
-				}
-
-				if n > 0 {
-					// Copy the data to avoid race conditions
-					msg := make([]byte, n)
-					copy(msg, buf[:n])
-					select {
-					case controlMsg <- msg:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}
-	}()
-
-	// Main control loop
-	for {
-		select {
-		case <-ctx.Done():
-			log.Infof("Context cancelled, stopping control connection handler")
-			return
-
-		case msg := <-controlMsg:
-			log.Infof("Received control message: %v", msg)
-			// Handle control messages here if needed
-
-		case <-keepAliveTicker.C:
-			// Send keep-alive message
-			_, err := controlConn.Write([]byte{0x00}) // Simple keep-alive byte
-			if err != nil {
-				log.Errorf("Failed to send keep-alive: %v", err)
-				return
-			}
-			log.Debugf("Sent keep-alive message")
-		}
-	}
 }
