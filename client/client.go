@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"neofrp/common/multidialer"
@@ -17,6 +18,7 @@ import (
 	C "neofrp/common/constant"
 
 	"github.com/charmbracelet/log"
+	"github.com/quic-go/quic-go"
 )
 
 func Run(config *config.ClientConfig) {
@@ -96,7 +98,6 @@ func Run(config *config.ClientConfig) {
 		wg.Wait()
 	}()
 
-	// Block until we receive a signal
 	<-sigChan
 	log.Infof("Received shutdown signal, stopping client...")
 	cancel()
@@ -135,7 +136,17 @@ func handleIncomingStreams(ctx context.Context, session multidialer.Session, con
 			// Accept incoming streams from the server
 			stream, err := session.AcceptStream(ctx)
 			if err != nil {
-				log.Errorf("Failed to accept stream: %v", err)
+				var appErr *quic.ApplicationError
+				if errors.As(err, &appErr) && appErr.ErrorCode == 0x100 {
+					// Remote has closed connection.
+					// Cancel the context
+					log.Error("Remote closed connection forcefully, stopping stream handler")
+					time.Sleep(100 * time.Millisecond)
+					ctx.Value(C.ContextSignalChanKey).(chan os.Signal) <- os.Interrupt
+					return
+				} else {
+					log.Errorf("Failed to accept stream: %v", err)
+				}
 				// Add a small delay to prevent tight loop on persistent errors
 				time.Sleep(100 * time.Millisecond)
 				continue
