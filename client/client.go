@@ -16,6 +16,7 @@ import (
 
 	"neofrp/common/config"
 	C "neofrp/common/constant"
+	P "neofrp/common/protocol"
 
 	"github.com/charmbracelet/log"
 	"github.com/quic-go/quic-go"
@@ -100,6 +101,8 @@ func Run(config *config.ClientConfig) {
 
 	<-sigChan
 	log.Infof("Received shutdown signal, stopping client...")
+	controlConn.Write([]byte{P.ActionClose})
+	time.Sleep(100 * time.Millisecond) // Give some time for the close message to be sent
 	cancel()
 
 	// Wait for graceful shutdown with timeout

@@ -199,7 +199,7 @@ func RunControlLoop(ctx context.Context, controlConn multidialer.Stream, session
 				// Update last recorded keep-alive time
 				ctx = context.WithValue(ctx, C.ContextLastKeepAliveKey, time.Now())
 			case P.ActionClose:
-				log.Infof("Received active close action from server, closing connection")
+				log.Infof("Received active close action from client, closing connection")
 				CancelConnection(ctx)
 			}
 
