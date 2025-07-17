@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"neofrp/common/config"
 	C "neofrp/common/constant"
@@ -58,6 +61,12 @@ func Run(config *config.ServerConfig) {
 }
 
 func handleSession(ctx context.Context, config *config.ServerConfig, session multidialer.Session) {
+	// Open a signal channel to handle cancellation
+	cancelChan := make(chan os.Signal, 1)
+	signal.Notify(cancelChan, os.Interrupt, syscall.SIGTERM)
+	ctx = context.WithValue(ctx, C.ContextSignalChanKey, cancelChan)
+	defer close(cancelChan)
+
 	// Open a control stream for the session
 	controlConn, err := session.AcceptStream(ctx)
 	if err != nil {
@@ -111,6 +120,21 @@ func handleSession(ctx context.Context, config *config.ServerConfig, session mul
 	if err != nil {
 		log.Errorf("Negotiation failed: %v", err)
 		return
+	}
+
+	// Setup the control feedback loop
+	go RunControlLoop(ctx, controlConn, session, config)
+
+	// Wait for cancellation signal
+	<- cancelChan
+	log.Infof("Received cancellation signal, closing session %s", session.RemoteAddr())
+
+	// Close the session gracefully
+	err = session.Close(fmt.Errorf("session closed by server due to cancellation"))
+	if err != nil {
+		log.Errorf("Failed to close session: %v", err)
+	} else {
+		log.Infof("Session %s closed successfully", session.RemoteAddr())
 	}
 }
 

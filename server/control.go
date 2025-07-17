@@ -1,14 +1,19 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
 	"slices"
+	"time"
 
 	"neofrp/common/config"
 	C "neofrp/common/constant"
 	"neofrp/common/multidialer"
 	P "neofrp/common/protocol"
+
+	"github.com/charmbracelet/log"
 )
 
 type ControlHandler struct {
@@ -102,4 +107,97 @@ func (h *ControlHandler) Negotiate() error {
 	}
 
 	return nil
+}
+
+func CancelConnection(ctx context.Context) {
+	cancelChan := ctx.Value(C.ContextSignalChanKey).(chan os.Signal)
+	if cancelChan != nil {
+		log.Debug("Sending interrupt signal to cancel connection")
+		cancelChan <- os.Interrupt
+	} else {
+		log.Warn("No cancel channel found in context, cannot send interrupt signal")
+	}
+}
+
+func RunControlLoop(ctx context.Context, controlConn multidialer.Stream, session multidialer.Session, config *config.ServerConfig) {
+	defer controlConn.Close()
+
+	// Send periodic keep-alive messages to maintain the connection
+	keepAliveTicker := time.NewTicker(C.KeepAliveInterval)
+	defer keepAliveTicker.Stop()
+
+	// Channel to handle control messages
+	controlMsg := make(chan []byte, 10)
+
+	// Start a goroutine to read control messages
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				n, err := controlConn.Read(buf)
+				if err != nil {
+					if err != io.EOF {
+						log.Errorf("Error reading from control connection: %v", err)
+					}
+					return
+				}
+
+				if n > 0 {
+					// Copy the data to avoid race conditions
+					msg := make([]byte, n)
+					copy(msg, buf[:n])
+					select {
+					case controlMsg <- msg:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// Setup keepalive monitoring
+	go func() {
+		ticker := time.NewTicker(C.KeepAliveTimeout)
+		for range ticker.C {
+			lastKeepAlive := ctx.Value(C.ContextLastKeepAliveKey)
+			if lastKeepAlive == nil || time.Since(lastKeepAlive.(time.Time)) > C.KeepAliveTimeout {
+				log.Warnf("No keep-alive received in the last %v, closing connection", C.KeepAliveTimeout)
+				// Close the connection to the server
+				CancelConnection(ctx)
+			}
+		}
+	}()
+
+	// Main control loop
+	for {
+		select {
+		case <-ctx.Done():
+			log.Infof("Context cancelled, stopping control connection handler")
+			return
+
+		case msg := <-controlMsg:
+			log.Debugf("Received control message: %v", msg)
+			switch msg[0] {
+			case P.ActionKeepAlive:
+				// Update last recorded keep-alive time
+				ctx = context.WithValue(ctx, C.ContextLastKeepAliveKey, time.Now())
+			case P.ActionClose:
+				log.Infof("Received active close action from server, closing connection")
+				CancelConnection(ctx)
+			}
+
+		case <-keepAliveTicker.C:
+			// Send keep-alive message
+			_, err := controlConn.Write([]byte{P.ActionKeepAlive}) // Simple keep-alive byte
+			if err != nil {
+				log.Errorf("Failed to send keep-alive: %v", err)
+				return
+			}
+			log.Debugf("Sent keep-alive message")
+		}
+	}
 }

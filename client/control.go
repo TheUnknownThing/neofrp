@@ -197,7 +197,7 @@ func RunControlLoop(ctx context.Context, controlConn multidialer.Stream, session
 			return
 
 		case msg := <-controlMsg:
-			log.Infof("Received control message: %v", msg)
+			log.Debugf("Received control message: %v", msg)
 			switch msg[0] {
 			case P.ActionKeepAlive:
 				// Update last recorded keep-alive time
