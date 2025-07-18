@@ -35,7 +35,7 @@ A modern, high-performance reverse proxy implementation in Go, focusing on speed
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/RayZh-hs/neofrp/
 cd neofrp
 
 # Build both client and server
@@ -165,7 +165,7 @@ You can forward any local port, TCP or UDP, by editing the `client.json` file an
 
 ```bash
 # Clone and build
-git clone <repository-url>
+git clone https://github.com/RayZh-hs/neofrp/
 cd neofrp
 make build
 
