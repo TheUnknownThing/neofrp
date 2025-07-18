@@ -134,6 +134,14 @@ You can forward any local port, TCP or UDP, by editing the `client.json` file an
 | `connections.tcp_ports` | array | TCP ports to expose | [] |
 | `connections.udp_ports` | array | UDP ports to expose | [] |
 
+You can use templating to register a range of ports:
+
+```json
+{{ expand "1000-1200" }}
+```
+
+This will expand to a list of ports from 1000 to 1200, inclusive, connected by commas.
+
 ### Client Configuration
 
 | Field | Type | Description | Default |

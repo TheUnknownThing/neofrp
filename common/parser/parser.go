@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"neofrp/common/config"
@@ -16,12 +17,24 @@ func ParseClientConfig(filePath string) (*config.ClientConfig, error) {
 	}
 	defer file.Close()
 
-	decoder := json.NewDecoder(file)
+	// Read the file content
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply template processing
+	processedContent, err := ApplyTemplate(content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the processed JSON content
 	clientConfig := &config.ClientConfig{}
 	// Set default values before decoding
 	clientConfig.LogConfig.LogLevel = "info"
 
-	if err := decoder.Decode(clientConfig); err != nil {
+	if err := json.Unmarshal(processedContent, clientConfig); err != nil {
 		return nil, err
 	}
 
@@ -36,12 +49,24 @@ func ParseServerConfig(filePath string) (*config.ServerConfig, error) {
 	}
 	defer file.Close()
 
-	decoder := json.NewDecoder(file)
+	// Read the file content
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply template processing
+	processedContent, err := ApplyTemplate(content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the processed JSON content
 	serverConfig := &config.ServerConfig{}
 	// Set default values before decoding
 	serverConfig.LogConfig.LogLevel = "info"
 
-	if err := decoder.Decode(serverConfig); err != nil {
+	if err := json.Unmarshal(processedContent, serverConfig); err != nil {
 		return nil, err
 	}
 
