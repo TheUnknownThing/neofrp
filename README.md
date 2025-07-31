@@ -131,6 +131,8 @@ You can forward any local port, TCP or UDP, by editing the `client.json` file an
 | `recognized_tokens` | array | List of valid client tokens | [] |
 | `transport.protocol` | string | Transport protocol ("quic" or "tcp") | "quic" |
 | `transport.port` | number | Server listening port | Required |
+| `transport.cert_file` | string | Path to TLS certificate file | (self-signed) |
+| `transport.key_file` | string | Path to TLS key file | (self-signed) |
 | `connections.tcp_ports` | array | TCP ports to expose | [] |
 | `connections.udp_ports` | array | UDP ports to expose | [] |
 
@@ -151,6 +153,8 @@ This will expand to a list of ports from 1000 to 1200, inclusive, connected by c
 | `transport.protocol` | string | Transport protocol ("quic" or "tcp") | "quic" |
 | `transport.server_ip` | string | Server IP address | Required |
 | `transport.server_port` | number | Server port | Required |
+| `transport.ca_file` | string | Path to CA file for server verification | (none) |
+| `transport.server_name` | string | Server name for SNI | `transport.server_ip` |
 | `connections` | array | Connection configurations | Required |
 
 #### Connection Configuration

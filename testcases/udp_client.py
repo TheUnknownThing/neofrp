@@ -18,14 +18,13 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        # logging.FileHandler('/root/udp_client.log')
     ]
 )
 
 logger = logging.getLogger(__name__)
 
 class UDPClient:
-    def __init__(self, server_host='10.26.116.54', server_port=35561):
+    def __init__(self, server_host='127.0.0.1', server_port=35561):
         self.server_host = server_host
         self.server_port = server_port
         self.socket = None

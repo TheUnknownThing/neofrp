@@ -24,14 +24,13 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        # logging.FileHandler('/root/tcp_client.log')
     ]
 )
 
 logger = logging.getLogger(__name__)
 
 class TCPClient:
-    def __init__(self, server_host='10.26.116.54', server_port=35560):
+    def __init__(self, server_host='127.0.0.1', server_port=35560):
         self.server_host = server_host
         self.server_port = server_port
         self.socket = None

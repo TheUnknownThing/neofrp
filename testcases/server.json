@@ -7,7 +7,9 @@
     ],
     "transport": {
         "protocol": "quic",
-        "port": 3400
+        "port": 3400,
+        "cert_file": "",
+        "key_file": ""
     },
     "connections": {
         "tcp_ports": [

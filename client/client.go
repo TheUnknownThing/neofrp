@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +27,7 @@ func Run(config *config.ClientConfig) {
 	// Initialize the client service with the provided configuration
 	log.Debugf("Run using config: %+v", config)
 	// First create the master connection to the server
-	tlsConfig, err := GetTLSConfig()
+	tlsConfig, err := GetTLSConfig(&config.TransportConfig)
 	if err != nil {
 		log.Errorf("Failed to get TLS config: %v", err)
 		return
@@ -120,13 +121,31 @@ func Run(config *config.ClientConfig) {
 	}
 }
 
-func GetTLSConfig() (*tls.Config, error) {
-	return &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         "",             // Empty server name to avoid SNI issues
-		NextProtos:         []string{"h3"}, // HTTP/3 for QUIC
-		MinVersion:         tls.VersionTLS12,
-	}, nil
+func GetTLSConfig(config *config.ClientTransportConfig) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		ServerName: config.ServerName,
+		MinVersion: tls.VersionTLS12,
+	}
+
+	if config.CAFile != "" {
+		caCert, err := os.ReadFile(config.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA file: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+		tlsConfig.RootCAs = caCertPool
+	} else {
+		// For backward compatibility and ease of use in trusted environments,
+		// but this is not recommended for production.
+		tlsConfig.InsecureSkipVerify = true
+	}
+
+	if config.Protocol == "quic" {
+		tlsConfig.NextProtos = []string{"h3"}
+	}
+
+	return tlsConfig, nil
 }
 
 func handleIncomingStreams(ctx context.Context, session multidialer.Session, config *config.ClientConfig) {
