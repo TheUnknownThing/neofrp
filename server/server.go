@@ -92,6 +92,8 @@ func handleSession(ctx context.Context, wg *sync.WaitGroup, config *config.Serve
 	defer wg.Done()
 	// Create a cancellable context for this session
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	// Store cancel func in context so helper utilities (CancelConnection) can terminate session without relying on signal channel
+	sessionCtx = context.WithValue(sessionCtx, C.ContextSessionCancelKey, sessionCancel)
 	defer sessionCancel()
 
 	// Cleanup function to ensure resources are properly released

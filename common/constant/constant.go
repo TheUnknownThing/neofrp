@@ -20,6 +20,8 @@ const (
 	ContextPortMapKey       = ContextKeyType(0x01)
 	ContextLastKeepAliveKey = ContextKeyType(0x02)
 	ContextSignalChanKey    = ContextKeyType(0x03)
+	// ContextSessionCancelKey stores a context.CancelFunc for per-session cancellation on server side
+	ContextSessionCancelKey = ContextKeyType(0x04)
 )
 
 var LogLevelMap = map[string]log.Level{

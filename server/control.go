@@ -110,18 +110,23 @@ func (h *ControlHandler) Negotiate() error {
 }
 
 func CancelConnection(ctx context.Context) {
-	cancelChan := ctx.Value(C.ContextSignalChanKey).(chan os.Signal)
-	if cancelChan != nil {
-		log.Debug("Sending interrupt signal to cancel connection")
-		select {
-		case cancelChan <- os.Interrupt:
-			// Signal sent successfully
-		default:
-			// Channel is full or closed, ignore
-			log.Debug("Cancel channel is full or closed, skipping signal")
+	// Prefer using a stored session cancel func if available
+	if v := ctx.Value(C.ContextSessionCancelKey); v != nil {
+		if cancelFunc, ok := v.(context.CancelFunc); ok && cancelFunc != nil {
+			log.Debug("Calling session cancel function")
+			cancelFunc()
 		}
-	} else {
-		log.Warn("No cancel channel found in context, cannot send interrupt signal")
+	}
+	// Backwards compatibility: attempt to send signal if channel present
+	if v := ctx.Value(C.ContextSignalChanKey); v != nil {
+		if cancelChan, ok := v.(chan os.Signal); ok && cancelChan != nil {
+			log.Debug("Sending interrupt signal to cancel connection via signal channel")
+			select {
+			case cancelChan <- os.Interrupt:
+			default:
+				log.Debug("Cancel channel is full or closed, skipping signal")
+			}
+		}
 	}
 }
 
