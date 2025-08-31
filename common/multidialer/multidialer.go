@@ -30,9 +30,6 @@ var (
 	ErrStreamClosed  = errors.New("stream closed")
 )
 
-// --- Interfaces ---
-
-// Stream is an abstraction for a single bidirectional flow of data.
 // It can be a QUIC stream or an emulated stream over TCP.
 type Stream io.ReadWriteCloser
 
@@ -63,7 +60,16 @@ func Dial(ctx context.Context, protocol, address string, tlsConfig *tls.Config) 
 		}
 		return NewTCPSession(conn, true), nil // isClient = true
 	case "quic":
-		conn, err := quic.DialAddr(ctx, address, tlsConfig, nil)
+		qcfg := &quic.Config{
+			// Increase flow control windows to allow high throughput on high BDP paths / loopback.
+			InitialStreamReceiveWindow:     6 * 1024 * 1024,   // 6MB
+			MaxStreamReceiveWindow:         64 * 1024 * 1024,  // 64MB
+			InitialConnectionReceiveWindow: 15 * 1024 * 1024,  // 15MB
+			MaxConnectionReceiveWindow:     128 * 1024 * 1024, // 128MB
+			MaxIncomingStreams:             1024,
+			MaxIdleTimeout:                 2 * time.Minute,
+		}
+		conn, err := quic.DialAddr(ctx, address, tlsConfig, qcfg)
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +94,15 @@ func Listen(ctx context.Context, protocol, address string, tlsConfig *tls.Config
 		}
 		return &tcpListener{Listener: l}, nil
 	case "quic":
-		l, err := quic.ListenAddr(address, tlsConfig, nil)
+		qcfg := &quic.Config{
+			InitialStreamReceiveWindow:     6 * 1024 * 1024,
+			MaxStreamReceiveWindow:         64 * 1024 * 1024,
+			InitialConnectionReceiveWindow: 15 * 1024 * 1024,
+			MaxConnectionReceiveWindow:     128 * 1024 * 1024,
+			MaxIncomingStreams:             1024,
+			MaxIdleTimeout:                 2 * time.Minute,
+		}
+		l, err := quic.ListenAddr(address, tlsConfig, qcfg)
 		if err != nil {
 			return nil, err
 		}
@@ -307,6 +321,7 @@ func (s *tcpSession) readLoop() {
 }
 
 func (s *tcpSession) writeFrame(id uint16, data []byte) (int, error) {
+	// Fast-path: ensure session still open
 	select {
 	case <-s.closed:
 		return 0, ErrSessionClosed
@@ -317,19 +332,20 @@ func (s *tcpSession) writeFrame(id uint16, data []byte) (int, error) {
 		return 0, fmt.Errorf("payload size %d exceeds MaxPayloadSize %d", len(data), MaxPayloadSize)
 	}
 
-	header := make([]byte, headerSize)
+	// Build header on stack to avoid allocation.
+	var header [headerSize]byte
 	binary.BigEndian.PutUint16(header[0:2], id)
 	binary.BigEndian.PutUint16(header[2:4], uint16(len(data)))
 
-	// In a real-world high-performance scenario, you'd use vectored I/O (Writev)
-	// or a buffer pool for the combined write to avoid allocation.
-	// For simplicity, we concatenate here.
-	frame := append(header, data...)
-	n, err := s.conn.Write(frame)
+	// Use net.Buffers to leverage writev (coalesced syscalls) when possible.
+	// Fallback: if underlying conn doesn't implement writev, WriteTo will loop.
+	bufs := net.Buffers{header[:], data}
+	n64, err := bufs.WriteTo(s.conn)
 	if err != nil {
-		s.Close(err) // If write fails, the session is likely broken
+		// Close session on write failure to propagate error to all streams.
+		s.Close(err)
 	}
-	return n, err
+	return int(n64), err
 }
 
 func (s *tcpSession) removeStream(id uint16) {
@@ -406,6 +422,38 @@ func (s *tcpStream) Write(p []byte) (n int, err error) {
 	}
 
 	return written, nil
+}
+
+// ReadFrom implements io.ReaderFrom to optimize io.Copy into the stream.
+// It batches reads from r into a reusable buffer and writes frames without
+// the additional overhead of intermediate io.Copy 32KB allocations.
+func (s *tcpStream) ReadFrom(r io.Reader) (n int64, err error) {
+	if s.writeClosed {
+		return 0, ErrStreamClosed
+	}
+	// 1MB buffer strikes a balance between syscall overhead and memory usage.
+	buf := make([]byte, 1<<20)
+	for {
+		nr, er := r.Read(buf)
+		if nr > 0 {
+			if s.writeClosed {
+				return n, ErrStreamClosed
+			}
+			// Write may chunk internally to MaxPayloadSize.
+			if _, ew := s.Write(buf[:nr]); ew != nil {
+				err = ew
+				break
+			}
+			n += int64(nr)
+		}
+		if er != nil {
+			if er != io.EOF {
+				err = er
+			}
+			break
+		}
+	}
+	return n, err
 }
 
 func (s *tcpStream) Close() error {
