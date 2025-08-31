@@ -123,7 +123,8 @@ func (l *TCPPortListener) Start() error {
 type UDPPortListener struct {
 	TaggedPort  C.TaggedPort
 	PortMap     *safemap.SafeMap[C.TaggedPort, *list.List]
-	SourceMap   *safemap.SafeMap[*net.UDPAddr, *multidialer.Stream]
+	// SourceMap maps remote UDP addr string (IP:port) -> multiplexed stream
+	SourceMap   *safemap.SafeMap[string, *multidialer.Stream]
 	nextSession int
 	mutex       sync.Mutex
 }
@@ -139,7 +140,7 @@ func (l *UDPPortListener) Start() error {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, addr, err := conn.ReadFromUDP(buf)
+	    n, addr, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				log.Warnf("Failed to read from UDP port %s: %v", l.TaggedPort.String(), err)
 				continue
@@ -147,14 +148,15 @@ func (l *UDPPortListener) Start() error {
 			log.Infof("Received %d bytes from %s on UDP port %s", n, addr.String(), l.TaggedPort.String())
 			// Handle the received data
 			// First, check whether an existing stream exists for this address
-			stream, exists := l.SourceMap.Get(addr)
+	    key := addr.String()
+	    stream, exists := l.SourceMap.Get(key)
 			if exists {
 				_, err = (*stream).Write(buf[:n])
 				if err != nil {
 					log.Errorf("Failed to write to existing stream for %s: %v", addr.String(), err)
 					// Clean up the failed stream
 					(*stream).Close()
-					l.SourceMap.Delete(addr)
+		    l.SourceMap.Delete(key)
 					continue
 				}
 			} else {
@@ -202,19 +204,18 @@ func (l *UDPPortListener) Start() error {
 					continue
 				}
 				// Store the new stream in the source map
-				l.SourceMap.Set(addr, &newStream)
+				l.SourceMap.Set(key, &newStream)
 				log.Infof("Opened new stream for %s on UDP port %s", addr.String(), l.TaggedPort.String())
 
 				// Start a goroutine to handle responses from the stream back to the UDP client
-				go l.handleUDPStreamResponse(conn, addr, &newStream)
+				go l.handleUDPStreamResponse(conn, addr, key, &newStream)
 
-				time.Sleep(C.RelayInterval)
-				// Now write the data to the new stream
+				// Now write the first datagram to the new stream
 				_, err = newStream.Write(buf[:n])
 				if err != nil {
 					log.Errorf("Failed to write data to new stream for %s: %v", addr.String(), err)
 					newStream.Close()
-					l.SourceMap.Delete(addr)
+					l.SourceMap.Delete(key)
 					continue
 				}
 			}
@@ -224,10 +225,10 @@ func (l *UDPPortListener) Start() error {
 }
 
 // handleUDPStreamResponse handles responses from the stream back to the UDP client
-func (l *UDPPortListener) handleUDPStreamResponse(conn *net.UDPConn, clientAddr *net.UDPAddr, stream *multidialer.Stream) {
+func (l *UDPPortListener) handleUDPStreamResponse(conn *net.UDPConn, clientAddr *net.UDPAddr, key string, stream *multidialer.Stream) {
 	defer func() {
 		(*stream).Close()
-		l.SourceMap.Delete(clientAddr)
+	l.SourceMap.Delete(key)
 		log.Infof("Closed stream for %s on UDP port %s", clientAddr.String(), l.TaggedPort.String())
 	}()
 
