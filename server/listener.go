@@ -1,10 +1,12 @@
 package server
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	C "neofrp/common/constant"
@@ -15,8 +17,10 @@ import (
 )
 
 type TCPPortListener struct {
-	TaggedPort C.TaggedPort
-	PortMap    *safemap.SafeMap[C.TaggedPort, C.SessionIndexCompound]
+	TaggedPort  C.TaggedPort
+	PortMap     *safemap.SafeMap[C.TaggedPort, *list.List]
+	nextSession int
+	mutex       sync.Mutex
 }
 
 func (l *TCPPortListener) Start() error {
@@ -31,12 +35,42 @@ func (l *TCPPortListener) Start() error {
 				log.Warnf("Failed to accept connection for port %s: %v", l.TaggedPort.String(), err)
 				continue
 			}
-			comp, ac := l.PortMap.Get(l.TaggedPort)
-			if !ac {
-				log.Warnf("Failed to get session for port %s: %v", l.TaggedPort.String(), err)
+			sessionList, ac := l.PortMap.Get(l.TaggedPort)
+			l.mutex.Lock()
+			if !ac || sessionList.Len() == 0 {
+				l.mutex.Unlock()
+				log.Warnf("No available session for port %s, closing connection", l.TaggedPort.String())
 				conn.Close()
 				continue
 			}
+			if l.nextSession >= sessionList.Len() {
+				l.nextSession = 0
+			}
+			element := sessionList.Front()
+			if element == nil {
+				l.mutex.Unlock()
+				log.Warnf("Session list is empty for port %s, closing connection", l.TaggedPort.String())
+				conn.Close()
+				continue
+			}
+			for i := 0; i < l.nextSession; i++ {
+				if element == nil {
+					log.Warnf("Session list modified during iteration for port %s, resetting nextSession", l.TaggedPort.String())
+					l.nextSession = 0
+					break
+				}
+				element = element.Next()
+			}
+			if element == nil {
+				log.Warnf("No valid session found for port %s, closing connection", l.TaggedPort.String())
+				l.mutex.Unlock()
+				conn.Close()
+				continue
+			}
+			comp := element.Value.(*C.SessionIndexCompound)
+			l.nextSession++
+			l.mutex.Unlock()
+
 			log.Infof("Accepted connection for port %s from %s", l.TaggedPort.String(), conn.RemoteAddr())
 			if comp.Session == nil {
 				log.Warnf("Session is nil for port %s, closing connection", l.TaggedPort.String())
@@ -87,9 +121,11 @@ func (l *TCPPortListener) Start() error {
 }
 
 type UDPPortListener struct {
-	TaggedPort C.TaggedPort
-	PortMap    *safemap.SafeMap[C.TaggedPort, C.SessionIndexCompound]
-	SourceMap  *safemap.SafeMap[*net.UDPAddr, *multidialer.Stream]
+	TaggedPort  C.TaggedPort
+	PortMap     *safemap.SafeMap[C.TaggedPort, *list.List]
+	SourceMap   *safemap.SafeMap[*net.UDPAddr, *multidialer.Stream]
+	nextSession int
+	mutex       sync.Mutex
 }
 
 func (l *UDPPortListener) Start() error {
@@ -122,11 +158,32 @@ func (l *UDPPortListener) Start() error {
 					continue
 				}
 			} else {
-				comp, ac := l.PortMap.Get(l.TaggedPort)
-				if !ac {
-					log.Warnf("Failed to get session for port %s: %v", l.TaggedPort.String(), err)
+				sessionList, ac := l.PortMap.Get(l.TaggedPort)
+				if !ac || sessionList.Len() == 0 {
+					log.Warnf("No available session for port %s, ignoring data from %s", l.TaggedPort.String(), addr.String())
 					continue
 				}
+
+				l.mutex.Lock()
+				if l.nextSession >= sessionList.Len() {
+					l.nextSession = 0
+				}
+				element := sessionList.Front()
+				for i := 0; i < l.nextSession; i++ {
+					if element == nil {
+						log.Warnf("Reached nil element before target index %d for port %s", l.nextSession, l.TaggedPort.String())
+						break
+					}
+					element = element.Next()
+				}
+				if element == nil {
+					log.Warnf("No valid session element found for port %s, ignoring data from %s", l.TaggedPort.String(), addr.String())
+					continue
+				}
+				comp := element.Value.(*C.SessionIndexCompound)
+				l.nextSession++
+				l.mutex.Unlock()
+
 				if comp.Session == nil {
 					log.Warnf("Session is nil for port %s, ignoring data from %s", l.TaggedPort.String(), addr.String())
 					continue

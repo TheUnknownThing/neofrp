@@ -10,22 +10,38 @@ import (
 	"math/big"
 	"net"
 	"time"
+
+	"neofrp/common/config"
 )
 
-func GetTLSConfig() (*tls.Config, error) {
+func GetTLSConfig(cfg *config.ServerTransportConfig) (*tls.Config, error) {
+	if cfg.CertFile != "" && cfg.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load x509 key pair: %v", err)
+		}
+		return &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}, nil
+	}
+
 	// Generate a self-signed certificate for the server
 	cert, err := generateSelfSignedCert()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate self-signed certificate: %v", err)
 	}
 
-	return &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: true,
-		ServerName:         "",             // Empty server name to avoid SNI issues
-		NextProtos:         []string{"h3"}, // HTTP/3 for QUIC
-		MinVersion:         tls.VersionTLS12,
-	}, nil
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	if cfg.Protocol == "quic" {
+		tlsConfig.NextProtos = []string{"h3"}
+	}
+
+	return tlsConfig, nil
 }
 
 func generateSelfSignedCert() (tls.Certificate, error) {

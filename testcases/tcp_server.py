@@ -24,7 +24,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('/root/tcp_server.log')
     ]
 )
 

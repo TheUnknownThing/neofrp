@@ -86,6 +86,11 @@ func ValidateClientConfig(config *config.ClientConfig) error {
 	if config.TransportConfig.Port == 0 {
 		return fmt.Errorf("server port is required in field 'transport'")
 	}
+	if config.TransportConfig.CAFile != "" {
+		if _, err := os.Stat(config.TransportConfig.CAFile); os.IsNotExist(err) {
+			return fmt.Errorf("ca_file not found: %s", config.TransportConfig.CAFile)
+		}
+	}
 	for i, conn := range config.ConnectionConfigs {
 		if conn.Type != "tcp" && conn.Type != "udp" {
 			return fmt.Errorf("connection %d: invalid connection type: %s", i, conn.Type)
@@ -106,6 +111,19 @@ func ValidateServerConfig(config *config.ServerConfig) error {
 	}
 	if len(config.RecognizedTokens) == 0 {
 		return fmt.Errorf("at least one recognized token is required for the server to start")
+	}
+	if (config.TransportConfig.CertFile != "" && config.TransportConfig.KeyFile == "") || (config.TransportConfig.CertFile == "" && config.TransportConfig.KeyFile != "") {
+		return fmt.Errorf("cert_file and key_file must be provided together")
+	}
+	if config.TransportConfig.CertFile != "" {
+		if _, err := os.Stat(config.TransportConfig.CertFile); os.IsNotExist(err) {
+			return fmt.Errorf("cert_file not found: %s", config.TransportConfig.CertFile)
+		}
+	}
+	if config.TransportConfig.KeyFile != "" {
+		if _, err := os.Stat(config.TransportConfig.KeyFile); os.IsNotExist(err) {
+			return fmt.Errorf("key_file not found: %s", config.TransportConfig.KeyFile)
+		}
 	}
 	return nil
 }
